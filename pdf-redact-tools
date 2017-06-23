@@ -37,7 +37,13 @@ class PDFRedactTools(object):
 
         self.transparent_filename = os.path.join(self.pages_dirname, 'page-transparent.png')
 
-    def explode(self, achromatic = False):
+    def set_microdot_removal_params(self, microdot_removal_fuzz,
+        microdot_removal_dot_color, microdot_removal_background_color):
+        self.microdot_removal_fuzz = microdot_removal_fuzz
+        self.microdot_removal_dot_color = microdot_removal_dot_color
+        self.microdot_removal_background_color = microdot_removal_background_color
+
+    def explode(self, achromatic = False, microdot_removal = False):
         if not self.pdf_filename:
             print 'Error: you must call set_pdf_filename before calling explode'
             return False
@@ -92,6 +98,28 @@ class PDFRedactTools(object):
                     # remove original files
                     os.remove(os.path.join(self.pages_dirname, filename))
                     # rename files with the '-bw.png' suffix to '.png'
+                    os.rename(os.path.join(self.pages_dirname, new_filename), os.path.join(self.pages_dirname, filename))
+
+        if microdot_removal:
+            print 'Removing microdots'
+            filenames = os.listdir(self.pages_dirname)
+            for filename in filenames:
+                if os.path.splitext(filename)[1].lower() == '.png':
+                    # temp filename
+                    new_filename = filename.replace('.png', '-temp.png')
+
+                    subprocess.call(['convert',
+                        os.path.join(self.pages_dirname, filename),
+                        '-fuzz', self.microdot_removal_fuzz,
+                        '-fill', self.microdot_removal_dot_color,
+                        '-opaque', self.microdot_removal_background_color,
+                        '-fuzz', self.microdot_removal_fuzz,
+                        '-fill', self.microdot_removal_background_color,
+                        '-opaque', self.microdot_removal_dot_color,
+                        os.path.join(self.pages_dirname, new_filename)])
+                    # remove original files
+                    os.remove(os.path.join(self.pages_dirname, filename))
+                    # rename temp files
                     os.rename(os.path.join(self.pages_dirname, new_filename), os.path.join(self.pages_dirname, filename))
 
         # rename files to sort alphabetically instead of just numerically
@@ -161,6 +189,28 @@ def parse_arguments():
     parser.add_argument('-a', '--achromatic',
             action='store_true',
             help='Convert to black and white to remove printer dots')
+    parser.add_argument('-rm', '--remove-microdots',
+            dest='microdot_removal',
+            action='store_true',
+            help='Experimental printer microdot removal.')
+    parser.add_argument('-fd', '--fuzz-distance',
+            action='store',
+            default='15000',
+            dest='microdot_removal_fuzz',
+            metavar='fuzz_distance',
+            help='Experimental printer microdot removal fuzz distance.')
+    parser.add_argument('-dc', '--dot-color',
+            action='store',
+            default='rgb(248, 250, 54)',
+            dest='microdot_removal_dot_color',
+            metavar='dot_color',
+            help='Experimental printer microdot removal microdot color.')
+    parser.add_argument('-bgc', '--background-color',
+            action='store',
+            default='white',
+            dest='microdot_removal_background_color',
+            metavar='background_color',
+            help='Experimental printer microdot removal document background color.')
     args = parser.parse_args()
     return args
 
@@ -178,14 +228,21 @@ def main():
     merge_filename = args.merge_filename
     sanitize_filename = args.sanitize_filename
     achromatic = args.achromatic
+    microdot_removal = args.microdot_removal
+    microdot_removal_fuzz = args.microdot_removal_fuzz
+    microdot_removal_background_color = args.microdot_removal_background_color
+    microdot_removal_dot_color = args.microdot_removal_dot_color
 
     pdfrt = PDFRedactTools()
+
+    if microdot_removal:
+        pdfrt.set_microdot_removal_params(microdot_removal_fuzz, microdot_removal_dot_color, microdot_removal_background_color)
 
     # explode
     if explode_filename:
         if valid_pdf(explode_filename):
             pdfrt.set_pdf_filename(explode_filename)
-            if pdfrt.explode(achromatic):
+            if pdfrt.explode(achromatic, microdot_removal):
                 print 'All done, now go edit PNGs in {} to redact and then run: pdf-redact-tools -m {}'.format(pdfrt.pages_dirname, pdfrt.pdf_filename)
         else:
             print explode_filename,' does not appear to be a PDF file, will not process'
@@ -203,7 +260,7 @@ def main():
     if sanitize_filename:
         if valid_pdf(sanitize_filename):
             pdfrt.set_pdf_filename(sanitize_filename)
-            if pdfrt.explode(achromatic):
+            if pdfrt.explode(achromatic, microdot_removal):
                 if pdfrt.merge():
                     # delete temp files
                     shutil.rmtree(pdfrt.pages_dirname)
